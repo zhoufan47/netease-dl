@@ -24,24 +24,26 @@ import com.pewee.neteasemusic.models.dtos.SingleMusicAnalysisRespDTO;
 import com.pewee.neteasemusic.models.dtos.TrackDTO;
 import com.pewee.neteasemusic.utils.FileUtils;
 import com.pewee.neteasemusic.utils.HttpClientUtil;
+import com.pewee.neteasemusic.utils.TagUtils;
+import java.io.File;
 
 import lombok.extern.slf4j.Slf4j;
 
 @Service
 @Slf4j
 public class MusicDownloadService {
-	
-	public static final ThreadPoolExecutor executor = new ThreadPoolExecutor(5, 5, 60, TimeUnit.MINUTES, new ArrayBlockingQueue<>(10000));
+
+	public static final ThreadPoolExecutor executor = new ThreadPoolExecutor(5, 5, 60, TimeUnit.MINUTES,
+			new ArrayBlockingQueue<>(10000));
 	@Resource
 	private AnalysisConfig config;
-	
+
 	@Value("${download.path}")
 	private String path;
-	
+
 	@Resource
 	private AnalysisService analysisService;
-	
-	
+
 	public String getPath() {
 		return path;
 	}
@@ -50,19 +52,14 @@ public class MusicDownloadService {
 		this.path = path;
 	}
 
-
-
-
 	private static final String SINGLE_SONG = "Song_V1";
 	private static final String PLAY_LIST = "Playlist";
 	private static final String ALBUM = "Album";
-	
-	
-	
+
 	private String getType(String url) {
-		return url.substring(url.lastIndexOf(".") , url.indexOf("?"));
+		return url.substring(url.lastIndexOf("."), url.indexOf("?"));
 	}
-	
+
 	public void downloadAlbum(Long id) {
 		AlbumAnalysisRespDTO analysisAlbum = analysisAlbum(id);
 		if (200 != analysisAlbum.getStatus()) {
@@ -70,12 +67,12 @@ public class MusicDownloadService {
 		}
 		List<TrackDTO> tracks = analysisAlbum.getAlbum().getSongs();
 		for (TrackDTO trackDTO : tracks) {
-			executor.execute( () -> {
+			executor.execute(() -> {
 				downloadSingleSong(trackDTO.getId());
-			} );
+			});
 		}
 	}
-	
+
 	public void downloadPlaylist(Long id) {
 		PlaylistAnalysisRespDTO analysisPlaylist = analysisPlaylist(id);
 		if (200 != analysisPlaylist.getStatus()) {
@@ -83,12 +80,12 @@ public class MusicDownloadService {
 		}
 		List<TrackDTO> tracks = analysisPlaylist.getPlaylist().getTracks();
 		for (TrackDTO trackDTO : tracks) {
-			executor.execute( () -> {
+			executor.execute(() -> {
 				downloadSingleSong(trackDTO.getId());
-			} );
+			});
 		}
 	}
-	
+
 	public void downloadSingleSong(Long id) {
 		SingleMusicAnalysisRespDTO analysisSingleMusic = analysisSingleMusic(id);
 		if (200 != analysisSingleMusic.getStatus()) {
@@ -96,74 +93,77 @@ public class MusicDownloadService {
 		}
 		String dir = path + analysisSingleMusic.getAl_name();
 		String fileName = analysisSingleMusic.getName();
-		log.info("开始将歌曲: {} 写入目录: {}",fileName, dir);
-		FileUtils.writeToFile(Paths.get(dir ,fileName + getType(analysisSingleMusic.getUrl())), 
+		log.info("开始将歌曲: {} 写入目录: {}", fileName, dir);
+		FileUtils.writeToFile(Paths.get(dir, fileName + getType(analysisSingleMusic.getUrl())),
 				HttpClientUtil.getInputStream(analysisSingleMusic.getUrl(), null));
-		log.info("将歌曲: {} 写入目录: {} 已完成!",fileName, dir);
+		File file = Paths.get(dir, fileName + getType(analysisSingleMusic.getUrl())).toFile();
+		TagUtils.setTags(file, analysisSingleMusic.getName(), analysisSingleMusic.getAr_name(),
+				analysisSingleMusic.getAl_name());
+		log.info("将歌曲: {} 写入目录: {} 已完成!", fileName, dir);
 		try {
-			log.info("开始将歌词: {} 写入目录: {}",fileName, dir);
-			FileUtils.writeToFile(Paths.get(dir ,fileName + ".lrc"), 
+			log.info("开始将歌词: {} 写入目录: {}", fileName, dir);
+			FileUtils.writeToFile(Paths.get(dir, fileName + ".lrc"),
 					analysisSingleMusic.getLyric().getBytes("UTF-8"));
-			log.info("将歌词: {} 写入目录: {} 已完成!",fileName, dir);
+			log.info("将歌词: {} 写入目录: {} 已完成!", fileName, dir);
 		} catch (UnsupportedEncodingException e) {
 			e.printStackTrace();
 		}
 	}
-	
+
 	private AlbumAnalysisRespDTO analysisAlbum(Long id) {
-		log.info("解析专辑id:{}",id);
+		log.info("解析专辑id:{}", id);
 		StringBuilder stringBuilder = new StringBuilder("");
 		stringBuilder.append("http://").append(config.getIp())
-		.append(":").append(config.getPort()).append("/").append(ALBUM)
-		.append("?type=json&level=lossless").append("&id=").append(id);
+				.append(":").append(config.getPort()).append("/").append(ALBUM)
+				.append("?type=json&level=lossless").append("&id=").append(id);
 		String executeGet = null;
 		try {
 			executeGet = HttpClientUtil.executeGet(stringBuilder.toString(), null, null);
 		} catch (IOException | URISyntaxException e) {
-			log.error("调用解析失败!!",e);
+			log.error("调用解析失败!!", e);
 			throw new ServiceException(CommonRespInfo.SYS_ERROR, e);
 		}
 		AlbumAnalysisRespDTO respDTO = JSON.parseObject(executeGet, AlbumAnalysisRespDTO.class);
-		log.info("调用解析返回:{}",JSON.toJSONString(respDTO));
-		return  respDTO;
+		log.info("调用解析返回:{}", JSON.toJSONString(respDTO));
+		return respDTO;
 	}
-	
+
 	private PlaylistAnalysisRespDTO analysisPlaylist(Long id) {
-		log.info("解析歌单id:{}",id);
+		log.info("解析歌单id:{}", id);
 		StringBuilder stringBuilder = new StringBuilder("");
 		stringBuilder.append("http://").append(config.getIp())
-		.append(":").append(config.getPort()).append("/").append(PLAY_LIST)
-		.append("?type=json&level=lossless").append("&id=").append(id);
+				.append(":").append(config.getPort()).append("/").append(PLAY_LIST)
+				.append("?type=json&level=lossless").append("&id=").append(id);
 		String executeGet = null;
 		try {
 			executeGet = HttpClientUtil.executeGet(stringBuilder.toString(), null, null);
 		} catch (IOException | URISyntaxException e) {
-			log.error("调用解析失败!!",e);
+			log.error("调用解析失败!!", e);
 			throw new ServiceException(CommonRespInfo.SYS_ERROR, e);
 		}
 		PlaylistAnalysisRespDTO respDTO = JSON.parseObject(executeGet, PlaylistAnalysisRespDTO.class);
-		log.info("调用解析返回:{}",JSON.toJSONString(respDTO));
-		return  respDTO;
+		log.info("调用解析返回:{}", JSON.toJSONString(respDTO));
+		return respDTO;
 	}
-	
+
 	private SingleMusicAnalysisRespDTO analysisSingleMusic(Long ids) {
-		log.info("解析音乐id:{}",ids);
+		log.info("解析音乐id:{}", ids);
 		StringBuilder stringBuilder = new StringBuilder("");
 		stringBuilder.append("http://").append(config.getIp())
-		.append(":").append(config.getPort()).append("/").append(SINGLE_SONG)
-		.append("?type=json&level=lossless").append("&ids=").append(ids);
+				.append(":").append(config.getPort()).append("/").append(SINGLE_SONG)
+				.append("?type=json&level=lossless").append("&ids=").append(ids);
 		String executeGet = null;
 		try {
 			executeGet = HttpClientUtil.executeGet(stringBuilder.toString(), null, null);
 		} catch (IOException | URISyntaxException e) {
-			log.error("调用解析失败!!",e);
+			log.error("调用解析失败!!", e);
 			throw new ServiceException(CommonRespInfo.SYS_ERROR, e);
 		}
 		SingleMusicAnalysisRespDTO respDTO = JSON.parseObject(executeGet, SingleMusicAnalysisRespDTO.class);
-		log.info("调用解析返回:{}",JSON.toJSONString(respDTO));
+		log.info("调用解析返回:{}", JSON.toJSONString(respDTO));
 		return respDTO;
 	}
-	
+
 	public void downloadSingleSongV2(Long id) {
 		SingleMusicAnalysisRespDTO analysisSingleMusic = analysisService.analyzeSingleSong(id, "lossless");
 		if (200 != analysisSingleMusic.getStatus()) {
@@ -171,45 +171,48 @@ public class MusicDownloadService {
 		}
 		String dir = path;
 		String fileName = analysisSingleMusic.getName();
-		log.info("开始将歌曲: {} 写入目录: {}",fileName, dir);
-		FileUtils.writeToFile(Paths.get(dir ,fileName + getType(analysisSingleMusic.getUrl())), 
+		log.info("开始将歌曲: {} 写入目录: {}", fileName, dir);
+		FileUtils.writeToFile(Paths.get(dir, fileName + getType(analysisSingleMusic.getUrl())),
 				HttpClientUtil.getInputStream(analysisSingleMusic.getUrl(), null));
-		log.info("将歌曲: {} 写入目录: {} 已完成!",fileName, dir);
+		File file = Paths.get(dir, fileName + getType(analysisSingleMusic.getUrl())).toFile();
+		TagUtils.setTags(file, analysisSingleMusic.getName(), analysisSingleMusic.getAr_name(),
+				analysisSingleMusic.getAl_name());
+		log.info("将歌曲: {} 写入目录: {} 已完成!", fileName, dir);
 		try {
-			log.info("开始将歌词: {} 写入目录: {}",fileName, dir);
-			FileUtils.writeToFile(Paths.get(dir ,fileName + ".lrc"), 
+			log.info("开始将歌词: {} 写入目录: {}", fileName, dir);
+			FileUtils.writeToFile(Paths.get(dir, fileName + ".lrc"),
 					analysisSingleMusic.getLyric().getBytes("UTF-8"));
-			log.info("将歌词: {} 写入目录: {} 已完成!",fileName, dir);
+			log.info("将歌词: {} 写入目录: {} 已完成!", fileName, dir);
 		} catch (UnsupportedEncodingException e) {
 			e.printStackTrace();
 		}
-		
-	}
-	
 
-	public void doDownloadSingleSongV2(Long id,String path) {
+	}
+
+	public void doDownloadSingleSongV2(Long id, String path) {
 		SingleMusicAnalysisRespDTO analysisSingleMusic = analysisService.analyzeSingleSong(id, "lossless");
 		if (200 != analysisSingleMusic.getStatus()) {
 			throw new ServiceException(CommonRespInfo.SYS_ERROR);
 		}
 		String dir = path;
 		String fileName = analysisSingleMusic.getName();
-		log.info("开始将歌曲: {} 写入目录: {}",fileName, dir);
-		FileUtils.writeToFile(Paths.get(dir ,fileName + getType(analysisSingleMusic.getUrl())), 
+		log.info("开始将歌曲: {} 写入目录: {}", fileName, dir);
+		FileUtils.writeToFile(Paths.get(dir, fileName + getType(analysisSingleMusic.getUrl())),
 				HttpClientUtil.getInputStream(analysisSingleMusic.getUrl(), null));
-		log.info("将歌曲: {} 写入目录: {} 已完成!",fileName, dir);
+		File file = Paths.get(dir, fileName + getType(analysisSingleMusic.getUrl())).toFile();
+		TagUtils.setTags(file, analysisSingleMusic.getName(), analysisSingleMusic.getAr_name(),
+				analysisSingleMusic.getAl_name());
+		log.info("将歌曲: {} 写入目录: {} 已完成!", fileName, dir);
 		try {
-			log.info("开始将歌词: {} 写入目录: {}",fileName, dir);
-			FileUtils.writeToFile(Paths.get(dir ,fileName + ".lrc"), 
+			log.info("开始将歌词: {} 写入目录: {}", fileName, dir);
+			FileUtils.writeToFile(Paths.get(dir, fileName + ".lrc"),
 					analysisSingleMusic.getLyric().getBytes("UTF-8"));
-			log.info("将歌词: {} 写入目录: {} 已完成!",fileName, dir);
+			log.info("将歌词: {} 写入目录: {} 已完成!", fileName, dir);
 		} catch (UnsupportedEncodingException e) {
 			e.printStackTrace();
 		}
-		
+
 	}
-	
-	
 
 	public void downloadPlaylistV2(Long id) {
 		PlaylistAnalysisRespDTO analysisPlaylist = analysisService.analyzePlaylist(id);
@@ -218,9 +221,10 @@ public class MusicDownloadService {
 		}
 		List<TrackDTO> tracks = analysisPlaylist.getPlaylist().getTracks();
 		for (TrackDTO trackDTO : tracks) {
-			executor.execute( () -> {
-				doDownloadSingleSongV2(trackDTO.getId(),this.path + "歌单/" + FileUtils.getValidatedPathName(analysisPlaylist.getPlaylist().getName())  + "/");
-			} );
+			executor.execute(() -> {
+				doDownloadSingleSongV2(trackDTO.getId(), this.path + "歌单/"
+						+ FileUtils.getValidatedPathName(analysisPlaylist.getPlaylist().getName()) + "/");
+			});
 		}
 	}
 
@@ -231,12 +235,12 @@ public class MusicDownloadService {
 		}
 		List<TrackDTO> tracks = analysisAlbum.getAlbum().getSongs();
 		for (TrackDTO trackDTO : tracks) {
-			executor.execute( () -> {
-				doDownloadSingleSongV2(trackDTO.getId(),this.path + "专辑/" + FileUtils.getValidatedPathName(analysisAlbum.getAlbum().getName()) + "/");
-			} );
+			executor.execute(() -> {
+				doDownloadSingleSongV2(trackDTO.getId(),
+						this.path + "专辑/" + FileUtils.getValidatedPathName(analysisAlbum.getAlbum().getName()) + "/");
+			});
 		}
-		
+
 	}
-	
-	
+
 }
