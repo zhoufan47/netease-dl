@@ -26,6 +26,18 @@ public class MusicDownloadControllerV2 {
 	@Resource
 	private MusicDownloadService musicService;
 	
+	@GetMapping("/setRepeat")
+	public RespEntity<String> setFlag(@RequestParam(value = "repeat") Boolean repeat) {
+		musicService.setRepeat(repeat);
+		return RespEntity.apply(CommonRespInfo.SUCCESS,"OK");
+	}
+	
+	@GetMapping("/getRepeat")
+	public RespEntity<Boolean> getFlag() {
+		Boolean flag = musicService.getRepeat();
+		return RespEntity.apply(CommonRespInfo.SUCCESS,flag);
+	}
+	
 	@GetMapping("/single")
 	public RespEntity<String> downloadSingle(@RequestParam(value = "id") Long id) {
 		musicService.downloadSingleSongV2(id);

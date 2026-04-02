@@ -57,6 +57,12 @@
     <h2>🎵 网易云音乐 · 下载器</h2>
     
     <div id="title">项目地址:https://github.com/pewee-live/netease-dl</div>
+    
+    <div style="margin-top: 10px;">
+        <label>
+            <input type="checkbox" id="repeatSwitch" onchange="toggleRepeat()"> 允许重复下载
+        </label>
+    </div>
 
 	<div class="tabs">
 		<nav class="tab-nav">
@@ -147,6 +153,31 @@
 	  
 
     <script>
+    	document.addEventListener("DOMContentLoaded", () => {
+		    axios.get('/v2/getRepeat')
+		        .then(resp => {
+		            if (resp.data.code === "000000") {
+		                document.getElementById('repeatSwitch').checked = resp.data.data === true;
+		            }
+		        })
+		        .catch(err => console.error("获取重复下载配置失败:", err));
+		});
+
+		function toggleRepeat() {
+		    const repeat = document.getElementById('repeatSwitch').checked;
+		    axios.get(`/v2/setRepeat?repeat=${repeat}`)
+		        .then(resp => {
+		            if (resp.data.code !== "000000") {
+		                console.warn("重复下载配置更新可能未成功", resp.data);
+		            }
+		        })
+		        .catch(err => {
+		            console.error("配置更新失败:", err);
+		            alert("配置更新失败");
+		            document.getElementById('repeatSwitch').checked = !repeat;
+		        });
+		}
+
     	document.querySelectorAll(".tab-link").forEach(button => {
 		  button.addEventListener("click", () => {
 		    const tabId = button.getAttribute("data-tab");
