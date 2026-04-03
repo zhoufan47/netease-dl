@@ -86,13 +86,14 @@ public class MusicDownloadService implements InitializingBean {
 
 		
 		String idsFile = path + "ids.txt";
-		bw = new BufferedWriter(new FileWriter(idsFile, true));
-		hs = new HashSet<>();
-		queue = new ArrayBlockingQueue<>(5000);
 		File file = new File(idsFile);
 		if (!file.exists()) {
 			file.createNewFile();
 		}
+		bw = new BufferedWriter(new FileWriter(idsFile, true));
+		hs = new HashSet<>();
+		queue = new ArrayBlockingQueue<>(5000);
+		
 		long length = file.length();
 		byte[] arr = new byte[(int) length];
 		try (FileInputStream i = new FileInputStream(file)) {
