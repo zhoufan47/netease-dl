@@ -1,14 +1,20 @@
 package com.pewee.neteasemusic.controller;
 
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
 import javax.annotation.Resource;
 
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.pewee.neteasemusic.enums.CommonRespInfo;
 import com.pewee.neteasemusic.models.common.RespEntity;
+import com.pewee.neteasemusic.models.dtos.DownloadTask;
 import com.pewee.neteasemusic.service.MusicDownloadService;
 
 import lombok.extern.slf4j.Slf4j;
@@ -50,10 +56,45 @@ public class MusicDownloadControllerV2 {
 		return RespEntity.apply(CommonRespInfo.SUCCESS,"OK");
 	}
 	
-	
 	@GetMapping("/album")
 	public RespEntity<String> downloadAlbum(@RequestParam(value = "id") Long id) {
 		musicService.downloadAlbumV2(id);
 		return RespEntity.apply(CommonRespInfo.SUCCESS,"OK");
+	}
+	
+	// ===================== 下载队列 =====================
+	
+	@GetMapping("/queue")
+	public RespEntity<List<DownloadTask>> getQueue(
+			@RequestParam(value = "limit", defaultValue = "50") int limit) {
+		return RespEntity.apply(CommonRespInfo.SUCCESS, musicService.getRecentTasks(limit));
+	}
+	
+	@GetMapping("/queue/count")
+	public RespEntity<Map<String, Object>> getQueueCount() {
+		Map<String, Object> result = new HashMap<>();
+		result.put("waiting", musicService.getWaitingCount());
+		result.put("total", musicService.getDownloadQueue().size());
+		return RespEntity.apply(CommonRespInfo.SUCCESS, result);
+	}
+	
+	// ===================== 音质配置 =====================
+	
+	@GetMapping("/quality")
+	public RespEntity<String> getQuality() {
+		return RespEntity.apply(CommonRespInfo.SUCCESS, musicService.getQualityLevel());
+	}
+	
+	@PostMapping("/quality")
+	public RespEntity<String> setQuality(@RequestParam(value = "level") String level) {
+		musicService.setQualityLevel(level);
+		return RespEntity.apply(CommonRespInfo.SUCCESS, "OK");
+	}
+	
+	// ===================== 下载路径 =====================
+	
+	@GetMapping("/path")
+	public RespEntity<String> getDownloadPath() {
+		return RespEntity.apply(CommonRespInfo.SUCCESS, musicService.getPath());
 	}
 }
