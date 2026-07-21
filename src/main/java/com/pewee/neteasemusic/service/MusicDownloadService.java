@@ -68,6 +68,20 @@ public class MusicDownloadService implements InitializingBean {
 
     @Override
     public void afterPropertiesSet() throws Exception {
+        // 首先确保下载目录存在（必须最先执行）
+        File pathDir = new File(path);
+        if (!pathDir.exists()) {
+            boolean created = pathDir.mkdirs();
+            if (!created) {
+                log.warn("无法创建下载目录: {}，将使用备用目录: {}", path, System.getProperty("user.home") + "/neteasemusic-dl/");
+                path = System.getProperty("user.home") + "/neteasemusic-dl/";
+                pathDir = new File(path);
+                if (!pathDir.exists()) {
+                    pathDir.mkdirs();
+                }
+            }
+        }
+
         String repeatFilePath = path + "repeat";
         File repeatFile = new File(repeatFilePath);
         if (!repeatFile.exists()) {
