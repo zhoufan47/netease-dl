@@ -16,6 +16,7 @@ import com.pewee.neteasemusic.enums.CommonRespInfo;
 import com.pewee.neteasemusic.models.common.RespEntity;
 import com.pewee.neteasemusic.models.dtos.DownloadTask;
 import com.pewee.neteasemusic.service.MusicDownloadService;
+import com.pewee.neteasemusic.service.NeteaseAPIService;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -31,6 +32,9 @@ public class MusicDownloadControllerV2 {
 	
 	@Resource
 	private MusicDownloadService musicService;
+	
+	@Resource
+	private NeteaseAPIService neteaseAPIService;
 	
 	@GetMapping("/setRepeat")
 	public RespEntity<String> setFlag(@RequestParam(value = "repeat") Boolean repeat) {
@@ -78,6 +82,28 @@ public class MusicDownloadControllerV2 {
 		return RespEntity.apply(CommonRespInfo.SUCCESS, result);
 	}
 	
+	/**
+	 * 清理已完成和失败的任务
+	 */
+	@PostMapping("/queue/clear")
+	public RespEntity<Map<String, Object>> clearFinishedTasks() {
+		int count = musicService.clearFinishedTasks();
+		Map<String, Object> result = new HashMap<>();
+		result.put("cleared", count);
+		return RespEntity.apply(CommonRespInfo.SUCCESS, result);
+	}
+	
+	/**
+	 * 清理所有任务
+	 */
+	@PostMapping("/queue/clearAll")
+	public RespEntity<Map<String, Object>> clearAllTasks() {
+		int count = musicService.clearAllTasks();
+		Map<String, Object> result = new HashMap<>();
+		result.put("cleared", count);
+		return RespEntity.apply(CommonRespInfo.SUCCESS, result);
+	}
+	
 	// ===================== 音质配置 =====================
 	
 	@GetMapping("/quality")
@@ -96,5 +122,16 @@ public class MusicDownloadControllerV2 {
 	@GetMapping("/path")
 	public RespEntity<String> getDownloadPath() {
 		return RespEntity.apply(CommonRespInfo.SUCCESS, musicService.getPath());
+	}
+	
+	// ===================== 登出/重新登录 =====================
+	
+	/**
+	 * 登出当前账号，清除cookie，以便重新登录
+	 */
+	@PostMapping("/logout")
+	public RespEntity<String> logout() {
+		neteaseAPIService.logout();
+		return RespEntity.apply(CommonRespInfo.SUCCESS, "OK");
 	}
 }

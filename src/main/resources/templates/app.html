@@ -195,7 +195,11 @@
         <div class="card">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
                 <h3>下载队列</h3>
-                <button class="btn btn-sm btn-outline" @click="loadQueue()">刷新</button>
+                <div style="display:flex;gap:6px;">
+                    <button class="btn btn-sm btn-outline" @click="loadQueue()">刷新</button>
+                    <button class="btn btn-sm btn-outline" @click="clearFinishedTasks()">清理已完成/失败</button>
+                    <button class="btn btn-sm btn-danger" @click="clearAllTasks()">清空队列</button>
+                </div>
             </div>
             <div v-if="queueTasks.length===0" class="empty">暂无下载任务</div>
             <div v-for="task in queueTasks" :key="task.taskId" class="queue-item">
@@ -227,8 +231,13 @@
                     <div class="setting-label">登录状态</div>
                     <div class="setting-desc">{{ loginStatus ? '已登录网易云音乐' : '未登录，部分功能不可用' }}</div>
                 </div>
-                <button v-if="!loginStatus" class="btn btn-sm btn-primary" @click="startQrLogin()">扫码登录</button>
-                <span v-else style="color:var(--success);font-size:.85rem;">✓ 已连接</span>
+                <div style="display:flex;gap:6px;">
+                    <button v-if="!loginStatus" class="btn btn-sm btn-primary" @click="startQrLogin()">扫码登录</button>
+                    <template v-else>
+                        <button class="btn btn-sm btn-outline" @click="logout()">退出登录</button>
+                        <button class="btn btn-sm btn-primary" @click="logout();startQrLogin()">重新登录</button>
+                    </template>
+                </div>
             </div>
         </div>
 
@@ -401,6 +410,23 @@ createApp({
             if (c && c.code === '000000') queueWaiting.value = c.data.waiting || 0;
         }
 
+        async function clearFinishedTasks() {
+            const r = await api('/v2/queue/clear', { method: 'POST' });
+            if (r && r.code === '000000') {
+                showToast('已清理 ' + (r.data.cleared || 0) + ' 个任务', 'success');
+                loadQueue();
+            }
+        }
+
+        async function clearAllTasks() {
+            if (!confirm('确定要清空所有下载任务吗？')) return;
+            const r = await api('/v2/queue/clearAll', { method: 'POST' });
+            if (r && r.code === '000000') {
+                showToast('已清空 ' + (r.data.cleared || 0) + ' 个任务', 'success');
+                loadQueue();
+            }
+        }
+
         function statusText(s) {
             return { WAITING:'等待中', DOWNLOADING:'下载中', COMPLETED:'已完成', FAILED:'失败' }[s] || s;
         }
@@ -413,6 +439,16 @@ createApp({
                 if (queueTimer) { clearInterval(queueTimer); queueTimer = null; }
             }
         });
+
+        // ====== 登出 ======
+        async function logout() {
+            const r = await api('/v2/logout', { method: 'POST' });
+            if (r && r.code === '000000') {
+                loginStatus.value = false;
+                showQr.value = false;
+                showToast('已退出登录', 'success');
+            }
+        }
 
         // ====== 设置 ======
         const qualityLevel = ref('lossless');
@@ -453,9 +489,9 @@ createApp({
             activeTab, loginStatus, toast, showToast,
             searchType, searchKeyword, searchResults, searchPage, searchLimit, searchLoading, searched,
             doSearch, viewAlbum, albumDetail, downloadSingle, downloadAlbum,
-            queueTasks, queueWaiting, loadQueue, statusText,
+            queueTasks, queueWaiting, loadQueue, clearFinishedTasks, clearAllTasks, statusText,
             qualityLevel, repeatEnabled, downloadPath, setQuality, setRepeat,
-            showQr, qrImage, qrStatusText, startQrLogin, formatDate
+            showQr, qrImage, qrStatusText, startQrLogin, logout, formatDate
         };
     }
 }).mount('#app');

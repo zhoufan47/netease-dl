@@ -231,6 +231,32 @@ public class MusicDownloadService implements InitializingBean {
                 .count();
     }
 
+    /**
+     * 清理已完成和失败的任务
+     * @return 清理的任务数量
+     */
+    public int clearFinishedTasks() {
+        int before = taskMap.size();
+        taskMap.entrySet().removeIf(entry -> {
+            DownloadTask.Status status = entry.getValue().getStatus();
+            return status == DownloadTask.Status.COMPLETED || status == DownloadTask.Status.FAILED;
+        });
+        int removed = before - taskMap.size();
+        log.info("清理了 {} 个已完成/失败的任务", removed);
+        return removed;
+    }
+
+    /**
+     * 清理所有任务（包括正在下载的）
+     * @return 清理的任务数量
+     */
+    public int clearAllTasks() {
+        int before = taskMap.size();
+        taskMap.clear();
+        log.info("清理了全部 {} 个任务", before);
+        return before;
+    }
+
     // ===================== 下载逻辑 =====================
 
     private String getType(String url) {
