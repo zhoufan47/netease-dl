@@ -308,7 +308,7 @@ public class MusicDownloadService implements InitializingBean {
     }
 
     public void downloadSingleSongV2(Long id) {
-        doDownloadSingleSongV2(id, this.path, DownloadTask.Type.SINGLE, null, null, null, null);
+        doDownloadSingleSongV2(id, this.path, DownloadTask.Type.SINGLE, null, null, null, null, 0);
     }
 
     public void downloadPlaylistV2(Long id) {
@@ -319,11 +319,13 @@ public class MusicDownloadService implements InitializingBean {
         List<TrackDTO> tracks = analysisPlaylist.getPlaylist().getTracks();
         String parentName = analysisPlaylist.getPlaylist().getName();
         String playlistCreator = analysisPlaylist.getPlaylist().getCreator();
-        for (TrackDTO trackDTO : tracks) {
+        for (int i = 0; i < tracks.size(); i++) {
+            TrackDTO trackDTO = tracks.get(i);
+            final int trackIndex = i + 1;
             executor.execute(() -> {
                 doDownloadSingleSongV2(trackDTO.getId(),
                         this.path + "歌单/" + FileUtils.getValidatedPathName(parentName) + "/",
-                        DownloadTask.Type.PLAYLIST, id, parentName, parentName, playlistCreator);
+                        DownloadTask.Type.PLAYLIST, id, parentName, parentName, playlistCreator, trackIndex);
             });
         }
     }
@@ -339,14 +341,15 @@ public class MusicDownloadService implements InitializingBean {
             executor.execute(() -> {
                 doDownloadSingleSongV2(trackDTO.getId(),
                         this.path + "专辑/" + FileUtils.getValidatedPathName(parentName) + "/",
-                        DownloadTask.Type.ALBUM, id, parentName, null, null);
+                        DownloadTask.Type.ALBUM, id, parentName, null, null, 0);
             });
         }
     }
 
     private void doDownloadSingleSongV2(Long id, String dirPath, DownloadTask.Type type,
                                          Long parentId, String parentName,
-                                         String overrideAlbum, String overrideAlbumArtist) {
+                                         String overrideAlbum, String overrideAlbumArtist,
+                                         int playlistTrackIndex) {
         if (!repeat && hs.contains(id)) {
             log.info("歌曲id: {} 已存在,跳过!", id);
             return;
@@ -382,6 +385,8 @@ public class MusicDownloadService implements InitializingBean {
             // 写入完整ID3标签（含封面、专辑艺术家、光盘号、音轨号、年份）
             String albumName = analysisSingleMusic.getAl_name();
             String albumArtist = analysisSingleMusic.getAlbum_artist();
+            Integer discNumber = analysisSingleMusic.getDisc_number();
+            Integer trackNumber = analysisSingleMusic.getTrack_number();
             // 歌单下载时，若开启playlistAsAlbum配置，使用歌单名和创建者覆盖专辑信息
             if (type == DownloadTask.Type.PLAYLIST && playlistAsAlbum
                     && overrideAlbum != null && !overrideAlbum.isEmpty()) {
@@ -389,10 +394,15 @@ public class MusicDownloadService implements InitializingBean {
                 if (overrideAlbumArtist != null && !overrideAlbumArtist.isEmpty()) {
                     albumArtist = overrideAlbumArtist;
                 }
+                // 使用歌单内曲目序号作为音轨号，光盘号统一为1
+                if (playlistTrackIndex > 0) {
+                    trackNumber = playlistTrackIndex;
+                }
+                discNumber = 1;
             }
             TagUtils.setTags(file, analysisSingleMusic.getName(), analysisSingleMusic.getAr_name(),
                     albumName, albumArtist,
-                    analysisSingleMusic.getDisc_number(), analysisSingleMusic.getTrack_number(),
+                    discNumber, trackNumber,
                     analysisSingleMusic.getYear(), analysisSingleMusic.getPic());
 
             log.info("将歌曲: {} 写入目录: {} 已完成!", fileName, dirPath);
