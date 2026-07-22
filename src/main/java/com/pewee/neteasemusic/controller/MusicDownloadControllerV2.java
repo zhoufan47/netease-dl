@@ -83,6 +83,14 @@ public class MusicDownloadControllerV2 {
 	}
 	
 	/**
+	 * 下载统计数据（历史总量、已完成、失败等）
+	 */
+	@GetMapping("/queue/stats")
+	public RespEntity<Map<String, Object>> getQueueStats() {
+		return RespEntity.apply(CommonRespInfo.SUCCESS, musicService.getStats());
+	}
+	
+	/**
 	 * 清理已完成和失败的任务
 	 */
 	@PostMapping("/queue/clear")

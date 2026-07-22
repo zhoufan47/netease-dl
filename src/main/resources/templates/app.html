@@ -82,6 +82,13 @@
         .loading { display:inline-block; width:16px; height:16px; border:2px solid var(--border); border-top-color:var(--primary); border-radius:50%; animation:spin .6s linear infinite; }
         @keyframes spin { to{transform:rotate(360deg)} }
         .count-badge { background:var(--danger); color:#fff; font-size:.7rem; padding:2px 6px; border-radius:10px; margin-left:6px; }
+        .progress-bar { width:100%; height:6px; background:#e2e8f0; border-radius:3px; margin-top:6px; overflow:hidden; }
+        .progress-fill { height:100%; background:linear-gradient(90deg,var(--primary),#818cf8); border-radius:3px; transition:width .5s ease; }
+        .progress-stats { font-size:.72rem; color:var(--text-secondary); margin-top:3px; display:flex; gap:10px; }
+        .stats-bar { display:flex; gap:16px; margin-bottom:16px; flex-wrap:wrap; }
+        .stat-item { text-align:center; flex:1; min-width:60px; padding:10px 6px; background:#f8fafc; border-radius:8px; }
+        .stat-num { font-size:1.2rem; font-weight:700; color:var(--primary); }
+        .stat-label { font-size:.72rem; color:var(--text-secondary); margin-top:2px; }
     </style>
 </head>
 <body>
@@ -271,6 +278,7 @@
 
     <!-- ==================== 下载队列页 ==================== -->
     <div v-show="activeTab==='queue'">
+        <!-- 统计栏 -->
         <div class="card">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
                 <h3>下载队列</h3>
@@ -283,17 +291,28 @@
             <div v-if="queueTasks.length===0" class="empty">暂无下载任务</div>
             <div v-for="task in queueTasks" :key="task.taskId" class="queue-item">
                 <div :class="'queue-status status-'+task.status"></div>
-                <div class="track-info">
+                <div class="track-info" style="flex:1;min-width:0;">
                     <div class="track-name">{{ task.songName }}</div>
                     <div class="track-meta">
                         {{ task.artist }} · {{ task.album }}
                         <span v-if="task.parentName"> · {{ task.type==='ALBUM'?'专辑':'歌单' }}: {{ task.parentName }}</span>
                     </div>
-                    <div class="track-meta" style="margin-top:2px;">
+                    <!-- 进度条：仅对 DOWNLOADING 且有 totalSize 的任务显示 -->
+                    <div v-if="task.status==='DOWNLOADING' && task.totalSize>0" class="progress-bar">
+                        <div class="progress-fill" :style="{width: progressPct(task)+'%'}"></div>
+                    </div>
+                    <div class="progress-stats">
                         <span :style="{color: task.status==='COMPLETED'?'var(--success)':task.status==='FAILED'?'var(--danger)':task.status==='DOWNLOADING'?'var(--info)':'var(--warning)'}">
                             {{ statusText(task.status) }}
                         </span>
-                        <span v-if="task.errorMessage" style="color:var(--danger);margin-left:6px;">{{ task.errorMessage }}</span>
+                        <template v-if="task.status==='DOWNLOADING' && task.totalSize>0">
+                            <span>{{ progressPct(task) }}%</span>
+                            <span>{{ formatSize(task.bytesDownloaded) }} / {{ formatSize(task.totalSize) }}</span>
+                            <span>{{ formatSpeed(task.speed) }}</span>
+                            <span v-if="task.eta>0">剩余 {{ formatEta(task.eta) }}</span>
+                        </template>
+                        <span v-if="task.status==='COMPLETED' && task.totalSize>0">{{ formatSize(task.totalSize) }}</span>
+                        <span v-if="task.errorMessage" style="color:var(--danger)">{{ task.errorMessage }}</span>
                     </div>
                 </div>
             </div>
@@ -526,6 +545,7 @@ createApp({
         // ====== 下载队列 ======
         const queueTasks = ref([]);
         const queueWaiting = ref(0);
+        const stats = reactive({ total: 0, downloading: 0, completed: 0, failed: 0, waiting: 0 });
         let queueTimer = null;
 
         async function loadQueue() {
@@ -533,6 +553,40 @@ createApp({
             if (r && r.code === '000000') queueTasks.value = r.data || [];
             const c = await api('/v2/queue/count');
             if (c && c.code === '000000') queueWaiting.value = c.data.waiting || 0;
+            loadStats();
+        }
+
+        async function loadStats() {
+            const s = await api('/v2/queue/stats');
+            if (s && s.code === '000000') {
+                Object.assign(stats, s.data);
+            }
+        }
+
+        function progressPct(task) {
+            if (!task.totalSize || task.totalSize <= 0) return 0;
+            return Math.min(100, Math.round(task.bytesDownloaded * 100 / task.totalSize));
+        }
+
+        function formatSize(bytes) {
+            if (!bytes || bytes <= 0) return '0 B';
+            const units = ['B', 'KB', 'MB', 'GB'];
+            let i = 0;
+            let size = bytes;
+            while (size >= 1024 && i < units.length - 1) { size /= 1024; i++; }
+            return size.toFixed(1) + ' ' + units[i];
+        }
+
+        function formatSpeed(bytesPerSec) {
+            if (!bytesPerSec || bytesPerSec <= 0) return '0 B/s';
+            return formatSize(bytesPerSec) + '/s';
+        }
+
+        function formatEta(seconds) {
+            if (!seconds || seconds <= 0) return '';
+            if (seconds < 60) return Math.round(seconds) + '秒';
+            if (seconds < 3600) return Math.floor(seconds / 60) + '分' + Math.round(seconds % 60) + '秒';
+            return Math.floor(seconds / 3600) + '时' + Math.floor((seconds % 3600) / 60) + '分';
         }
 
         async function clearFinishedTasks() {
@@ -559,7 +613,7 @@ createApp({
         watch(activeTab, (v) => {
             if (v === 'queue') {
                 loadQueue();
-                if (!queueTimer) queueTimer = setInterval(loadQueue, 5000);
+                if (!queueTimer) queueTimer = setInterval(loadQueue, 2000);
             } else {
                 if (queueTimer) { clearInterval(queueTimer); queueTimer = null; }
             }
@@ -624,7 +678,8 @@ createApp({
             doSearch, viewAlbum, viewPlaylist, albumDetail, playlistDetail,
             downloadSingle, downloadAlbum, downloadPlaylist,
             myPlaylists, myListPage, myListLimit, myListLoading, loadMyPlaylists,
-            queueTasks, queueWaiting, loadQueue, clearFinishedTasks, clearAllTasks, statusText,
+            queueTasks, queueWaiting, stats, loadQueue, loadStats, clearFinishedTasks, clearAllTasks, statusText,
+            progressPct, formatSize, formatSpeed, formatEta,
             qualityLevel, repeatEnabled, playlistAsAlbum, downloadPath, setQuality, setRepeat, setPlaylistAsAlbum,
             showQr, qrImage, qrStatusText, startQrLogin, logout, formatDate
         };
