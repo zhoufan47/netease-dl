@@ -399,6 +399,7 @@ public class MusicDownloadService implements InitializingBean {
                     trackNumber = playlistTrackIndex;
                 }
                 discNumber = 1;
+                analysisSingleMusic.setYear(null);
             }
             TagUtils.setTags(file, analysisSingleMusic.getName(), analysisSingleMusic.getAr_name(),
                     albumName, albumArtist,
