@@ -111,10 +111,12 @@
         <div class="sub-tabs">
             <button :class="'sub-tab'+(searchType==='song'?' active':'')" @click="searchType='song';searchResults=[];searchPage=1">歌曲搜索</button>
             <button :class="'sub-tab'+(searchType==='album'?' active':'')" @click="searchType='album';searchResults=[];searchPage=1">专辑搜索</button>
+            <button :class="'sub-tab'+(searchType==='playlist'?' active':'')" @click="searchType='playlist';searchResults=[];searchPage=1">歌单搜索</button>
+            <button :class="'sub-tab'+(searchType==='mylist'?' active':'')" @click="searchType='mylist';loadMyPlaylists()">我的歌单</button>
         </div>
 
-        <div class="search-bar">
-            <input v-model="searchKeyword" @keyup.enter="doSearch()" :placeholder="searchType==='song'?'搜索歌曲...':'搜索专辑...'">
+        <div class="search-bar" v-show="searchType!=='mylist'">
+            <input v-model="searchKeyword" @keyup.enter="doSearch()" :placeholder="searchType==='song'?'搜索歌曲...':searchType==='album'?'搜索专辑...':'搜索歌单...'">
             <button class="btn btn-primary" @click="doSearch()" :disabled="!searchKeyword.trim()">搜索</button>
         </div>
 
@@ -157,6 +159,83 @@
                 <span style="font-size:.85rem">第 {{ searchPage }} 页</span>
                 <button class="btn btn-outline btn-sm" :disabled="searchResults.length<searchLimit" @click="searchPage++;doSearch()">下一页</button>
             </div>
+        </div>
+
+        <!-- 歌单搜索结果 -->
+        <div v-if="searchType==='playlist'" class="card" v-show="searchResults.length>0">
+            <ul class="track-list">
+                <li v-for="item in searchResults" :key="item.id" class="track-item">
+                    <img v-if="item.picUrl" :src="item.picUrl" class="track-img">
+                    <div class="track-info">
+                        <div class="track-name">{{ item.name }}</div>
+                        <div class="track-meta">{{ item.creator }} · {{ item.trackCount }}首</div>
+                    </div>
+                    <div style="display:flex;gap:6px;">
+                        <button class="btn btn-sm btn-outline" @click="viewPlaylist(item.id)">查看</button>
+                        <button class="btn btn-sm btn-primary" @click="downloadPlaylist(item.id)">下载</button>
+                    </div>
+                </li>
+            </ul>
+            <div class="pagination" v-if="searchResults.length>0">
+                <button class="btn btn-outline btn-sm" :disabled="searchPage<=1" @click="searchPage--;doSearch()">上一页</button>
+                <span style="font-size:.85rem">第 {{ searchPage }} 页</span>
+                <button class="btn btn-outline btn-sm" :disabled="searchResults.length<searchLimit" @click="searchPage++;doSearch()">下一页</button>
+            </div>
+        </div>
+
+        <!-- 我的歌单 -->
+        <div v-if="searchType==='mylist'" class="card">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                <h3>我的歌单</h3>
+                <button class="btn btn-sm btn-outline" @click="loadMyPlaylists()">刷新</button>
+            </div>
+            <div v-if="myPlaylists.length===0 && !myListLoading" class="empty">{{ loginStatus ? '暂无收藏歌单' : '请先登录' }}</div>
+            <div v-if="myListLoading" class="empty"><span class="loading"></span> 加载中...</div>
+            <ul class="track-list" v-show="myPlaylists.length>0">
+                <li v-for="item in myPlaylists" :key="item.id" class="track-item">
+                    <img v-if="item.coverImgUrl" :src="item.coverImgUrl" class="track-img">
+                    <div class="track-info">
+                        <div class="track-name">{{ item.name }}</div>
+                        <div class="track-meta">{{ item.creator }} · {{ item.trackCount }}首</div>
+                    </div>
+                    <div style="display:flex;gap:6px;">
+                        <button class="btn btn-sm btn-outline" @click="viewPlaylist(item.id)">查看</button>
+                        <button class="btn btn-sm btn-primary" @click="downloadPlaylist(item.id)">下载</button>
+                    </div>
+                </li>
+            </ul>
+            <div class="pagination" v-if="myPlaylists.length>=myListLimit">
+                <button class="btn btn-outline btn-sm" :disabled="myListPage<=1" @click="myListPage--;loadMyPlaylists()">上一页</button>
+                <span style="font-size:.85rem">第 {{ myListPage }} 页</span>
+                <button class="btn btn-outline btn-sm" @click="myListPage++;loadMyPlaylists()">下一页</button>
+            </div>
+        </div>
+
+        <!-- 歌单详情弹窗 -->
+        <div v-if="playlistDetail" class="card">
+            <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:12px;">
+                <h3>歌单详情</h3>
+                <button class="btn btn-sm btn-outline" @click="playlistDetail=null">关闭</button>
+            </div>
+            <div class="album-detail">
+                <img v-if="playlistDetail.playlist.coverImgUrl" :src="playlistDetail.playlist.coverImgUrl">
+                <div class="album-detail-info">
+                    <h3>{{ playlistDetail.playlist.name }}</h3>
+                    <p>创建者: {{ playlistDetail.playlist.creator }}</p>
+                    <p>共 {{ playlistDetail.playlist.tracks?.length||0 }} 首</p>
+                    <p v-if="playlistDetail.playlist.description" style="font-size:.8rem;margin-top:4px;">{{ playlistDetail.playlist.description }}</p>
+                    <button class="btn btn-sm btn-primary" style="margin-top:8px;" @click="downloadPlaylist(playlistDetail.playlist.id)">下载整个歌单</button>
+                </div>
+            </div>
+            <ul class="track-list">
+                <li v-for="(t,i) in playlistDetail.playlist.tracks" :key="t.id" class="track-item">
+                    <div class="track-info">
+                        <div class="track-name">{{ i+1 }}. {{ t.name }}</div>
+                        <div class="track-meta">{{ t.artists }} · {{ t.album }}</div>
+                    </div>
+                    <button class="btn btn-sm btn-primary" @click="downloadSingle(t.id)">下载</button>
+                </li>
+            </ul>
         </div>
 
         <!-- 专辑详情弹窗 -->
@@ -369,7 +448,8 @@ createApp({
         async function doSearch() {
             if (!searchKeyword.value.trim()) return;
             searchLoading.value = true; searched.value = true;
-            const typeNum = searchType.value === 'song' ? 1 : 10;
+            const typeMap = { song: 1, album: 10, playlist: 1000 };
+            const typeNum = typeMap[searchType.value] || 1;
             const offset = (searchPage.value - 1) * searchLimit.value;
             const r = await api(`/Search?keywords=${encodeURIComponent(searchKeyword.value)}&type=${typeNum}&limit=${searchLimit.value}&offset=${offset}`);
             searchResults.value = (r && r.code === '000000' && r.data) ? r.data : [];
@@ -396,6 +476,41 @@ createApp({
             const r = await api('/v2/album?id=' + id);
             if (r && r.code === '000000') { showToast('专辑下载任务已提交', 'success'); }
             else { showToast('下载提交失败', 'error'); }
+        }
+
+        async function downloadPlaylist(id) {
+            const r = await api('/v2/playlist?id=' + id);
+            if (r && r.code === '000000') { showToast('歌单下载任务已提交', 'success'); }
+            else { showToast('下载提交失败', 'error'); }
+        }
+
+        async function viewPlaylist(id) {
+            const r = await api('/Playlist?id=' + id);
+            if (r && r.code === '000000' && r.data) {
+                playlistDetail.value = r.data;
+            } else {
+                showToast('加载歌单详情失败', 'error');
+            }
+        }
+
+        // ====== 我的歌单 ======
+        const myPlaylists = ref([]);
+        const myListPage = ref(1);
+        const myListLimit = ref(20);
+        const myListLoading = ref(false);
+        const playlistDetail = ref(null);
+
+        async function loadMyPlaylists() {
+            if (!loginStatus.value) { myPlaylists.value = []; return; }
+            myListLoading.value = true;
+            const offset = (myListPage.value - 1) * myListLimit.value;
+            const r = await api(`/MyPlaylist?limit=${myListLimit.value}&offset=${offset}`);
+            if (r && r.code === '000000' && r.data) {
+                myPlaylists.value = r.data.playlists || [];
+            } else {
+                myPlaylists.value = [];
+            }
+            myListLoading.value = false;
         }
 
         // ====== 下载队列 ======
@@ -488,7 +603,9 @@ createApp({
         return {
             activeTab, loginStatus, toast, showToast,
             searchType, searchKeyword, searchResults, searchPage, searchLimit, searchLoading, searched,
-            doSearch, viewAlbum, albumDetail, downloadSingle, downloadAlbum,
+            doSearch, viewAlbum, viewPlaylist, albumDetail, playlistDetail,
+            downloadSingle, downloadAlbum, downloadPlaylist,
+            myPlaylists, myListPage, myListLimit, myListLoading, loadMyPlaylists,
             queueTasks, queueWaiting, loadQueue, clearFinishedTasks, clearAllTasks, statusText,
             qualityLevel, repeatEnabled, downloadPath, setQuality, setRepeat,
             showQr, qrImage, qrStatusText, startQrLogin, logout, formatDate
