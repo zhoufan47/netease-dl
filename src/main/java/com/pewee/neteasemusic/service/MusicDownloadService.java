@@ -59,6 +59,9 @@ public class MusicDownloadService implements InitializingBean {
     // 音质等级配置
     private volatile String qualityLevel = "lossless";
 
+    // 歌单下载时是否将歌单名作为专辑信息写入标签
+    private volatile Boolean playlistAsAlbum = false;
+
     private BufferedWriter bw;
     private HashSet<Long> hs;
     private ArrayBlockingQueue<Long> queue;
@@ -112,6 +115,21 @@ public class MusicDownloadService implements InitializingBean {
                 }
             } catch (IOException e) {
                 log.error("读取音质配置错误!", e);
+            }
+        }
+
+        // 读取歌单作为专辑配置
+        String playlistAsAlbumFilePath = path + "playlist_as_album.txt";
+        File playlistAsAlbumFile = new File(playlistAsAlbumFilePath);
+        if (playlistAsAlbumFile.exists()) {
+            try (FileInputStream fis = new FileInputStream(playlistAsAlbumFile)) {
+                byte[] arr = new byte[1];
+                fis.read(arr);
+                String val = new String(arr).trim();
+                this.playlistAsAlbum = "1".equals(val);
+                log.info("读取到playlistAsAlbum配置:{}", val);
+            } catch (IOException e) {
+                log.error("读取playlistAsAlbum配置错误!", e);
             }
         }
 
@@ -183,6 +201,32 @@ public class MusicDownloadService implements InitializingBean {
 
     public void setPath(String path) {
         this.path = path;
+    }
+
+    // ===================== 歌单作为专辑配置 =====================
+
+    public Boolean getPlaylistAsAlbum() {
+        return this.playlistAsAlbum;
+    }
+
+    public void setPlaylistAsAlbum(Boolean playlistAsAlbum) {
+        this.playlistAsAlbum = playlistAsAlbum;
+        // 持久化到文件
+        String filePath = path + "playlist_as_album.txt";
+        File file = new File(filePath);
+        try {
+            if (!file.exists()) {
+                File parent = file.getParentFile();
+                if (parent != null && !parent.exists()) parent.mkdirs();
+                file.createNewFile();
+            }
+            try (FileOutputStream fos = new FileOutputStream(file)) {
+                fos.write(playlistAsAlbum ? "1".getBytes() : "0".getBytes());
+                fos.flush();
+            }
+        } catch (IOException e) {
+            log.error("保存playlistAsAlbum配置失败!", e);
+        }
     }
 
     // ===================== 重复下载配置 =====================
@@ -264,7 +308,7 @@ public class MusicDownloadService implements InitializingBean {
     }
 
     public void downloadSingleSongV2(Long id) {
-        doDownloadSingleSongV2(id, this.path, DownloadTask.Type.SINGLE, null, null);
+        doDownloadSingleSongV2(id, this.path, DownloadTask.Type.SINGLE, null, null, null, null);
     }
 
     public void downloadPlaylistV2(Long id) {
@@ -274,11 +318,12 @@ public class MusicDownloadService implements InitializingBean {
         }
         List<TrackDTO> tracks = analysisPlaylist.getPlaylist().getTracks();
         String parentName = analysisPlaylist.getPlaylist().getName();
+        String playlistCreator = analysisPlaylist.getPlaylist().getCreator();
         for (TrackDTO trackDTO : tracks) {
             executor.execute(() -> {
                 doDownloadSingleSongV2(trackDTO.getId(),
                         this.path + "歌单/" + FileUtils.getValidatedPathName(parentName) + "/",
-                        DownloadTask.Type.PLAYLIST, id, parentName);
+                        DownloadTask.Type.PLAYLIST, id, parentName, parentName, playlistCreator);
             });
         }
     }
@@ -294,13 +339,14 @@ public class MusicDownloadService implements InitializingBean {
             executor.execute(() -> {
                 doDownloadSingleSongV2(trackDTO.getId(),
                         this.path + "专辑/" + FileUtils.getValidatedPathName(parentName) + "/",
-                        DownloadTask.Type.ALBUM, id, parentName);
+                        DownloadTask.Type.ALBUM, id, parentName, null, null);
             });
         }
     }
 
     private void doDownloadSingleSongV2(Long id, String dirPath, DownloadTask.Type type,
-                                         Long parentId, String parentName) {
+                                         Long parentId, String parentName,
+                                         String overrideAlbum, String overrideAlbumArtist) {
         if (!repeat && hs.contains(id)) {
             log.info("歌曲id: {} 已存在,跳过!", id);
             return;
@@ -334,8 +380,18 @@ public class MusicDownloadService implements InitializingBean {
             File file = Paths.get(dirPath, fileName + getType(analysisSingleMusic.getUrl())).toFile();
 
             // 写入完整ID3标签（含封面、专辑艺术家、光盘号、音轨号、年份）
+            String albumName = analysisSingleMusic.getAl_name();
+            String albumArtist = analysisSingleMusic.getAlbum_artist();
+            // 歌单下载时，若开启playlistAsAlbum配置，使用歌单名和创建者覆盖专辑信息
+            if (type == DownloadTask.Type.PLAYLIST && playlistAsAlbum
+                    && overrideAlbum != null && !overrideAlbum.isEmpty()) {
+                albumName = overrideAlbum;
+                if (overrideAlbumArtist != null && !overrideAlbumArtist.isEmpty()) {
+                    albumArtist = overrideAlbumArtist;
+                }
+            }
             TagUtils.setTags(file, analysisSingleMusic.getName(), analysisSingleMusic.getAr_name(),
-                    analysisSingleMusic.getAl_name(), analysisSingleMusic.getAlbum_artist(),
+                    albumName, albumArtist,
                     analysisSingleMusic.getDisc_number(), analysisSingleMusic.getTrack_number(),
                     analysisSingleMusic.getYear(), analysisSingleMusic.getPic());
 

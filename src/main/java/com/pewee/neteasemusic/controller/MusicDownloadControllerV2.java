@@ -124,6 +124,19 @@ public class MusicDownloadControllerV2 {
 		return RespEntity.apply(CommonRespInfo.SUCCESS, musicService.getPath());
 	}
 	
+	// ===================== 歌单作为专辑配置 =====================
+	
+	@GetMapping("/playlistAsAlbum")
+	public RespEntity<Boolean> getPlaylistAsAlbum() {
+		return RespEntity.apply(CommonRespInfo.SUCCESS, musicService.getPlaylistAsAlbum());
+	}
+	
+	@PostMapping("/playlistAsAlbum")
+	public RespEntity<String> setPlaylistAsAlbum(@RequestParam(value = "enabled") Boolean enabled) {
+		musicService.setPlaylistAsAlbum(enabled);
+		return RespEntity.apply(CommonRespInfo.SUCCESS, "OK");
+	}
+	
 	// ===================== 登出/重新登录 =====================
 	
 	/**

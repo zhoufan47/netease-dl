@@ -356,6 +356,16 @@
             </div>
             <div class="setting-row">
                 <div>
+                    <div class="setting-label">歌单信息写入专辑标签</div>
+                    <div class="setting-desc">下载歌单时，将歌单名称作为专辑名、歌单作者作为专辑艺术家写入ID3标签</div>
+                </div>
+                <label class="switch">
+                    <input type="checkbox" v-model="playlistAsAlbum" @change="setPlaylistAsAlbum()">
+                    <span class="slider"></span>
+                </label>
+            </div>
+            <div class="setting-row">
+                <div>
                     <div class="setting-label">下载路径</div>
                     <div class="setting-desc">{{ downloadPath }}</div>
                 </div>
@@ -568,6 +578,7 @@ createApp({
         // ====== 设置 ======
         const qualityLevel = ref('lossless');
         const repeatEnabled = ref(true);
+        const playlistAsAlbum = ref(false);
         const downloadPath = ref('');
 
         async function loadSettings() {
@@ -575,6 +586,8 @@ createApp({
             if (q && q.code === '000000') qualityLevel.value = q.data;
             const rp = await api('/v2/getRepeat');
             if (rp && rp.code === '000000') repeatEnabled.value = rp.data;
+            const pa = await api('/v2/playlistAsAlbum');
+            if (pa && pa.code === '000000') playlistAsAlbum.value = pa.data === true;
             const p = await api('/v2/path');
             if (p && p.code === '000000') downloadPath.value = p.data;
         }
@@ -587,6 +600,11 @@ createApp({
         async function setRepeat() {
             await api('/v2/setRepeat?repeat=' + repeatEnabled.value);
             showToast('重复下载: ' + (repeatEnabled.value ? '开启' : '关闭'), 'success');
+        }
+
+        async function setPlaylistAsAlbum() {
+            await fetch('/v2/playlistAsAlbum', { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:'enabled='+playlistAsAlbum.value });
+            showToast('歌单信息写入专辑标签: ' + (playlistAsAlbum.value ? '开启' : '关闭'), 'success');
         }
 
         function formatDate(ts) {
@@ -607,7 +625,7 @@ createApp({
             downloadSingle, downloadAlbum, downloadPlaylist,
             myPlaylists, myListPage, myListLimit, myListLoading, loadMyPlaylists,
             queueTasks, queueWaiting, loadQueue, clearFinishedTasks, clearAllTasks, statusText,
-            qualityLevel, repeatEnabled, downloadPath, setQuality, setRepeat,
+            qualityLevel, repeatEnabled, playlistAsAlbum, downloadPath, setQuality, setRepeat, setPlaylistAsAlbum,
             showQr, qrImage, qrStatusText, startQrLogin, logout, formatDate
         };
     }
