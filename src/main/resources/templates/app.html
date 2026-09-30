@@ -53,12 +53,14 @@
         .status-DOWNLOADING { background:var(--info); animation:pulse 1s infinite; }
         .status-COMPLETED { background:var(--success); }
         .status-FAILED { background:var(--danger); }
+        .status-SKIPPED { background:var(--text-secondary); }
         @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
         .setting-row { display:flex; align-items:center; justify-content:space-between; padding:14px 0; border-bottom:1px solid var(--border); }
         .setting-row:last-child { border-bottom:none; }
         .setting-label { font-weight:500; }
         .setting-desc { font-size:.78rem; color:var(--text-secondary); margin-top:2px; }
         select.form-select { padding:8px 12px; border:1px solid var(--border); border-radius:8px; font-size:.85rem; outline:none; }
+        input.form-input { padding:8px 12px; border:1px solid var(--border); border-radius:8px; font-size:.85rem; outline:none; width:100%; }
         .switch { position:relative; display:inline-block; width:44px; height:24px; }
         .switch input { opacity:0; width:0; height:0; }
         .slider { position:absolute; cursor:pointer; inset:0; background:#cbd5e1; border-radius:24px; transition:.3s; }
@@ -331,7 +333,7 @@
                             <span v-if="task.eta>0">剩余 {{ formatEta(task.eta) }}</span>
                         </template>
                         <span v-if="task.status==='COMPLETED' && task.totalSize>0">{{ formatSize(task.totalSize) }}</span>
-                        <span v-if="task.errorMessage" style="color:var(--danger)">{{ task.errorMessage }}</span>
+                        <span v-if="task.errorMessage" :style="{color: task.status==='FAILED'?'var(--danger)':'var(--text-secondary)'}">{{ task.errorMessage }}</span>
                     </div>
                 </div>
             </div>
@@ -401,6 +403,29 @@
                     <input type="checkbox" v-model="playlistAsAlbum" @change="setPlaylistAsAlbum()">
                     <span class="slider"></span>
                 </label>
+            </div>
+            <div class="setting-row">
+                <div style="flex:1;">
+                    <div class="setting-label">文件命名</div>
+                    <div class="setting-desc">{{ namingTip }}</div>
+                    <select class="form-select" style="margin-top:8px;width:100%;" v-model="fileNamePattern" @change="setNaming()">
+                        <option v-for="p in namingPresets" :value="p">{{ p }}</option>
+                        <option value="__custom__">自定义…</option>
+                    </select>
+                    <input v-if="fileNamePattern==='__custom__'" class="form-input" style="margin-top:8px;width:100%;"
+                           v-model.trim="customPattern" placeholder="{歌曲名} - {歌手名}" @change="applyCustomPattern()">
+                </div>
+            </div>
+            <div class="setting-row">
+                <div>
+                    <div class="setting-label">文件已存在时</div>
+                    <div class="setting-desc">目标文件重名时的处理方式</div>
+                </div>
+                <select class="form-select" v-model="fileExistsStrategy" @change="setFileExists()">
+                    <option value="RENAME">自动重命名</option>
+                    <option value="SKIP">跳过</option>
+                    <option value="OVERWRITE">覆盖</option>
+                </select>
             </div>
             <div class="setting-row">
                 <div>
@@ -628,7 +653,7 @@ createApp({
         }
 
         function statusText(s) {
-            return { WAITING:'等待中', DOWNLOADING:'下载中', COMPLETED:'已完成', FAILED:'失败' }[s] || s;
+            return { WAITING:'等待中', DOWNLOADING:'下载中', COMPLETED:'已完成', FAILED:'失败', SKIPPED:'已跳过' }[s] || s;
         }
 
         watch(activeTab, (v) => {
@@ -655,6 +680,11 @@ createApp({
         const repeatEnabled = ref(true);
         const playlistAsAlbum = ref(false);
         const downloadPath = ref('');
+        const fileNamePattern = ref('{歌曲名} - {歌手名}');
+        const customPattern = ref('');
+        const namingPresets = ref([]);
+        const namingTip = ref('');
+        const fileExistsStrategy = ref('RENAME');
 
         async function loadSettings() {
             const q = await api('/v2/quality');
@@ -665,6 +695,20 @@ createApp({
             if (pa && pa.code === '000000') playlistAsAlbum.value = pa.data === true;
             const p = await api('/v2/path');
             if (p && p.code === '000000') downloadPath.value = p.data;
+            const n = await api('/v2/naming');
+            if (n && n.code === '000000') {
+                namingPresets.value = n.data.presets || [];
+                namingTip.value = n.data.tip || '';
+                const cur = n.data.pattern;
+                if (namingPresets.value.includes(cur)) {
+                    fileNamePattern.value = cur;
+                } else {
+                    fileNamePattern.value = '__custom__';
+                    customPattern.value = cur;
+                }
+            }
+            const fe = await api('/v2/fileExists');
+            if (fe && fe.code === '000000') fileExistsStrategy.value = fe.data;
         }
 
         async function setQuality() {
@@ -680,6 +724,50 @@ createApp({
         async function setPlaylistAsAlbum() {
             await fetch('/v2/playlistAsAlbum', { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:'enabled='+playlistAsAlbum.value });
             showToast('歌单信息写入专辑标签: ' + (playlistAsAlbum.value ? '开启' : '关闭'), 'success');
+        }
+
+        async function setNaming() {
+            if (fileNamePattern.value === '__custom__') {
+                showToast('请在下方输入自定义命名模板', 'info');
+                return;
+            }
+            const r = await postForm('/v2/naming', 'pattern=' + encodeURIComponent(fileNamePattern.value));
+            if (r && r.code === '000000') {
+                showToast('文件命名已更新: ' + fileNamePattern.value, 'success');
+            } else {
+                showToast('文件命名更新失败: ' + (r && r.msg ? r.msg : '未知错误'), 'error');
+                await loadSettings();
+            }
+        }
+
+        async function applyCustomPattern() {
+            if (!customPattern.value) return;
+            const r = await postForm('/v2/naming', 'pattern=' + encodeURIComponent(customPattern.value));
+            if (r && r.code === '000000') {
+                showToast('文件命名已更新: ' + customPattern.value, 'success');
+            } else {
+                showToast('文件命名更新失败: ' + (r && r.msg ? r.msg : '未知错误'), 'error');
+                await loadSettings();
+            }
+        }
+
+        async function setFileExists() {
+            const r = await postForm('/v2/fileExists', 'strategy=' + encodeURIComponent(fileExistsStrategy.value));
+            if (r && r.code === '000000') {
+                const label = { RENAME:'自动重命名', SKIP:'跳过', OVERWRITE:'覆盖' }[fileExistsStrategy.value];
+                showToast('文件已存在时: ' + label, 'success');
+            } else {
+                showToast('配置更新失败: ' + (r && r.msg ? r.msg : '未知错误'), 'error');
+            }
+        }
+
+        async function postForm(url, body) {
+            try {
+                const resp = await fetch(url, { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body });
+                return await resp.json();
+            } catch (e) {
+                return { code:'-100000', msg: e.message };
+            }
         }
 
         function formatDate(ts) {
@@ -702,6 +790,8 @@ createApp({
             queueTasks, queueWaiting, stats, loadQueue, loadStats, clearFinishedTasks, clearAllTasks, statusText,
             progressPct, formatSize, formatSpeed, formatEta,
             qualityLevel, repeatEnabled, playlistAsAlbum, downloadPath, setQuality, setRepeat, setPlaylistAsAlbum,
+            fileNamePattern, customPattern, namingPresets, namingTip, setNaming, applyCustomPattern,
+            fileExistsStrategy, setFileExists,
             showQr, qrImage, qrStatusText, startQrLogin, logout, formatDate
         };
     }

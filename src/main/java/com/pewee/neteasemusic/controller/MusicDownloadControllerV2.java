@@ -1,5 +1,6 @@
 package com.pewee.neteasemusic.controller;
 
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -17,6 +18,7 @@ import com.pewee.neteasemusic.models.common.RespEntity;
 import com.pewee.neteasemusic.models.dtos.DownloadTask;
 import com.pewee.neteasemusic.service.MusicDownloadService;
 import com.pewee.neteasemusic.service.NeteaseAPIService;
+import com.pewee.neteasemusic.utils.FileNameFormatter;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -125,6 +127,36 @@ public class MusicDownloadControllerV2 {
 		return RespEntity.apply(CommonRespInfo.SUCCESS, "OK");
 	}
 	
+	// ===================== 文件命名 =====================
+
+	@GetMapping("/naming")
+	public RespEntity<Map<String, Object>> getNaming() {
+		Map<String, Object> result = new HashMap<>();
+		result.put("pattern", musicService.getFileNamePattern());
+		result.put("presets", Arrays.asList(FileNameFormatter.PRESET_PATTERNS));
+		result.put("tip", FileNameFormatter.PLACEHOLDER_TIP);
+		return RespEntity.apply(CommonRespInfo.SUCCESS, result);
+	}
+
+	@PostMapping("/naming")
+	public RespEntity<String> setNaming(@RequestParam(value = "pattern") String pattern) {
+		musicService.setFileNamePattern(pattern);
+		return RespEntity.apply(CommonRespInfo.SUCCESS, "OK");
+	}
+
+	// ===================== 文件已存在时的处理策略 =====================
+
+	@GetMapping("/fileExists")
+	public RespEntity<String> getFileExistsStrategy() {
+		return RespEntity.apply(CommonRespInfo.SUCCESS, musicService.getFileExistsStrategy().name());
+	}
+
+	@PostMapping("/fileExists")
+	public RespEntity<String> setFileExistsStrategy(@RequestParam(value = "strategy") String strategy) {
+		musicService.setFileExistsStrategy(strategy);
+		return RespEntity.apply(CommonRespInfo.SUCCESS, "OK");
+	}
+
 	// ===================== 下载路径 =====================
 	
 	@GetMapping("/path")

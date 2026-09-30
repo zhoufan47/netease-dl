@@ -6,7 +6,9 @@ import lombok.Data;
 public class DownloadTask {
 
     public enum Status {
-        WAITING, DOWNLOADING, COMPLETED, FAILED
+        WAITING, DOWNLOADING, COMPLETED, FAILED,
+        /** 文件已存在且策略为跳过，无需重复下载 */
+        SKIPPED
     }
 
     public enum Type {

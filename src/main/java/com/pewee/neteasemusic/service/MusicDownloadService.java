@@ -3,8 +3,15 @@ package com.pewee.neteasemusic.service;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.io.UnsupportedEncodingException;
+import java.net.ConnectException;
+import java.net.SocketTimeoutException;
+import java.net.UnknownHostException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.AccessDeniedException;
+import java.nio.file.FileAlreadyExistsException;
+import java.nio.file.FileSystemException;
 import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
@@ -28,6 +35,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import com.pewee.neteasemusic.enums.CommonRespInfo;
+import com.pewee.neteasemusic.enums.FileExistsStrategy;
 import com.pewee.neteasemusic.exceptions.ServiceException;
 import com.pewee.neteasemusic.models.dtos.AlbumAnalysisRespDTO;
 import com.pewee.neteasemusic.models.dtos.DownloadTask;
@@ -35,6 +43,7 @@ import com.pewee.neteasemusic.models.dtos.PlaylistAnalysisRespDTO;
 import com.pewee.neteasemusic.models.dtos.SingleMusicAnalysisRespDTO;
 import com.pewee.neteasemusic.models.dtos.TrackDTO;
 import com.pewee.neteasemusic.repository.TaskRepository;
+import com.pewee.neteasemusic.utils.FileNameFormatter;
 import com.pewee.neteasemusic.utils.FileUtils;
 import com.pewee.neteasemusic.utils.HttpClientUtil;
 import com.pewee.neteasemusic.utils.TagUtils;
@@ -67,6 +76,17 @@ public class MusicDownloadService implements InitializingBean {
 
     // 歌单下载时是否将歌单名作为专辑信息写入标签
     private volatile Boolean playlistAsAlbum = false;
+
+    // 文件命名模板，默认带上歌手名以区分同名歌曲
+    private volatile String fileNamePattern = FileNameFormatter.DEFAULT_PATTERN;
+
+    // 目标文件已存在时的处理策略
+    private volatile FileExistsStrategy fileExistsStrategy = FileExistsStrategy.RENAME;
+
+    private static final String QUALITY_FILE = "quality.txt";
+    private static final String PLAYLIST_AS_ALBUM_FILE = "playlist_as_album.txt";
+    private static final String NAMING_FILE = "naming.txt";
+    private static final String FILE_EXISTS_FILE = "file_exists.txt";
 
     private BufferedWriter bw;
     private HashSet<Long> hs;
@@ -111,35 +131,31 @@ public class MusicDownloadService implements InitializingBean {
         }
 
         // 读取音质配置
-        String qualityFilePath = path + "quality.txt";
-        File qualityFile = new File(qualityFilePath);
-        if (qualityFile.exists()) {
-            try (FileInputStream fis = new FileInputStream(qualityFile)) {
-                byte[] arr = new byte[(int) qualityFile.length()];
-                fis.read(arr);
-                String q = new String(arr).trim();
-                if (!q.isEmpty()) {
-                    this.qualityLevel = q;
-                    log.info("读取到音质配置:{}", q);
-                }
-            } catch (IOException e) {
-                log.error("读取音质配置错误!", e);
-            }
+        String quality = readConfigFile(QUALITY_FILE);
+        if (StringUtils.isNotBlank(quality)) {
+            this.qualityLevel = quality;
+            log.info("读取到音质配置:{}", quality);
         }
 
         // 读取歌单作为专辑配置
-        String playlistAsAlbumFilePath = path + "playlist_as_album.txt";
-        File playlistAsAlbumFile = new File(playlistAsAlbumFilePath);
-        if (playlistAsAlbumFile.exists()) {
-            try (FileInputStream fis = new FileInputStream(playlistAsAlbumFile)) {
-                byte[] arr = new byte[1];
-                fis.read(arr);
-                String val = new String(arr).trim();
-                this.playlistAsAlbum = "1".equals(val);
-                log.info("读取到playlistAsAlbum配置:{}", val);
-            } catch (IOException e) {
-                log.error("读取playlistAsAlbum配置错误!", e);
-            }
+        String playlistAsAlbumVal = readConfigFile(PLAYLIST_AS_ALBUM_FILE);
+        if (StringUtils.isNotBlank(playlistAsAlbumVal)) {
+            this.playlistAsAlbum = "1".equals(playlistAsAlbumVal);
+            log.info("读取到playlistAsAlbum配置:{}", playlistAsAlbumVal);
+        }
+
+        // 读取文件命名模板
+        String naming = readConfigFile(NAMING_FILE);
+        if (StringUtils.isNotBlank(naming)) {
+            this.fileNamePattern = FileNameFormatter.normalize(naming);
+            log.info("读取到文件命名模板:{}", this.fileNamePattern);
+        }
+
+        // 读取文件已存在时的处理策略
+        String fileExists = readConfigFile(FILE_EXISTS_FILE);
+        if (StringUtils.isNotBlank(fileExists)) {
+            this.fileExistsStrategy = FileExistsStrategy.of(fileExists, FileExistsStrategy.RENAME);
+            log.info("读取到文件已存在策略:{}", this.fileExistsStrategy);
         }
 
         String idsFile = path + "ids.txt";
@@ -194,6 +210,48 @@ public class MusicDownloadService implements InitializingBean {
                 dbTasks.size(), interrupted);
     }
 
+    // ===================== 配置文件读写 =====================
+
+    /**
+     * 读取下载目录下的配置项，文件不存在或读取失败时返回 null
+     */
+    private String readConfigFile(String fileName) {
+        File file = new File(path + fileName);
+        if (!file.exists()) {
+            return null;
+        }
+        try (FileInputStream fis = new FileInputStream(file)) {
+            byte[] arr = new byte[(int) file.length()];
+            int read = fis.read(arr);
+            if (read <= 0) {
+                return null;
+            }
+            return new String(arr, 0, read, StandardCharsets.UTF_8).trim();
+        } catch (IOException e) {
+            log.error("读取配置{}错误!", fileName, e);
+            return null;
+        }
+    }
+
+    /**
+     * 将配置项持久化到下载目录，失败只记录日志，不影响下载
+     */
+    private void writeConfigFile(String fileName, String content) {
+        File file = new File(path + fileName);
+        try {
+            File parent = file.getParentFile();
+            if (parent != null && !parent.exists()) {
+                parent.mkdirs();
+            }
+            try (FileOutputStream fos = new FileOutputStream(file)) {
+                fos.write(content.getBytes(StandardCharsets.UTF_8));
+                fos.flush();
+            }
+        } catch (IOException e) {
+            log.error("保存配置{}失败!", fileName, e);
+        }
+    }
+
     @Scheduled(cron = "*/5 * * * * ?")
     public void syncLocalFile() {
         if (!repeat && !queue.isEmpty()) {
@@ -217,21 +275,7 @@ public class MusicDownloadService implements InitializingBean {
     public void setQualityLevel(String level) {
         this.qualityLevel = level;
         // 持久化到文件
-        String qualityFilePath = path + "quality.txt";
-        File qualityFile = new File(qualityFilePath);
-        try {
-            if (!qualityFile.exists()) {
-                File parent = qualityFile.getParentFile();
-                if (parent != null && !parent.exists()) parent.mkdirs();
-                qualityFile.createNewFile();
-            }
-            try (FileOutputStream fos = new FileOutputStream(qualityFile)) {
-                fos.write(level.getBytes());
-                fos.flush();
-            }
-        } catch (IOException e) {
-            log.error("保存音质配置失败!", e);
-        }
+        writeConfigFile(QUALITY_FILE, level);
     }
 
     // ===================== 下载路径配置 =====================
@@ -253,21 +297,38 @@ public class MusicDownloadService implements InitializingBean {
     public void setPlaylistAsAlbum(Boolean playlistAsAlbum) {
         this.playlistAsAlbum = playlistAsAlbum;
         // 持久化到文件
-        String filePath = path + "playlist_as_album.txt";
-        File file = new File(filePath);
-        try {
-            if (!file.exists()) {
-                File parent = file.getParentFile();
-                if (parent != null && !parent.exists()) parent.mkdirs();
-                file.createNewFile();
-            }
-            try (FileOutputStream fos = new FileOutputStream(file)) {
-                fos.write(playlistAsAlbum ? "1".getBytes() : "0".getBytes());
-                fos.flush();
-            }
-        } catch (IOException e) {
-            log.error("保存playlistAsAlbum配置失败!", e);
+        writeConfigFile(PLAYLIST_AS_ALBUM_FILE, playlistAsAlbum ? "1" : "0");
+    }
+
+    // ===================== 文件命名配置 =====================
+
+    public String getFileNamePattern() {
+        return this.fileNamePattern;
+    }
+
+    /**
+     * 设置文件命名模板，模板非法时抛出参数错误
+     */
+    public void setFileNamePattern(String pattern) {
+        String normalized = FileNameFormatter.normalize(pattern);
+        if (!FileNameFormatter.containsPlaceholder(normalized)) {
+            throw new ServiceException(CommonRespInfo.NOT_LEGAL_PARAM.getCode(),
+                    "文件命名模板至少需要包含一个占位符，" + FileNameFormatter.PLACEHOLDER_TIP);
         }
+        this.fileNamePattern = normalized;
+        writeConfigFile(NAMING_FILE, normalized);
+    }
+
+    // ===================== 文件已存在策略配置 =====================
+
+    public FileExistsStrategy getFileExistsStrategy() {
+        return this.fileExistsStrategy;
+    }
+
+    public void setFileExistsStrategy(String strategy) {
+        FileExistsStrategy parsed = FileExistsStrategy.of(strategy, FileExistsStrategy.RENAME);
+        this.fileExistsStrategy = parsed;
+        writeConfigFile(FILE_EXISTS_FILE, parsed.name());
     }
 
     // ===================== 重复下载配置 =====================
@@ -326,6 +387,7 @@ public class MusicDownloadService implements InitializingBean {
         stats.put("failed", taskRepository.countByStatus(DownloadTask.Status.FAILED));
         stats.put("downloading", taskRepository.countByStatus(DownloadTask.Status.DOWNLOADING));
         stats.put("waiting", taskRepository.countByStatus(DownloadTask.Status.WAITING));
+        stats.put("skipped", taskRepository.countByStatus(DownloadTask.Status.SKIPPED));
         return stats;
     }
 
@@ -337,11 +399,12 @@ public class MusicDownloadService implements InitializingBean {
         int before = taskMap.size();
         taskMap.entrySet().removeIf(entry -> {
             DownloadTask.Status status = entry.getValue().getStatus();
-            return status == DownloadTask.Status.COMPLETED || status == DownloadTask.Status.FAILED;
+            return status == DownloadTask.Status.COMPLETED || status == DownloadTask.Status.FAILED
+                    || status == DownloadTask.Status.SKIPPED;
         });
         int removed = before - taskMap.size();
         // 同步删除 SQLite
-        taskRepository.deleteByStatuses("COMPLETED", "FAILED");
+        taskRepository.deleteByStatuses("COMPLETED", "FAILED", "SKIPPED");
         log.info("清理了 {} 个已完成/失败的任务", removed);
         return removed;
     }
@@ -363,6 +426,21 @@ public class MusicDownloadService implements InitializingBean {
 
     private String getType(String url) {
         return url.substring(url.lastIndexOf("."), url.indexOf("?"));
+    }
+
+    /**
+     * 由音频的最终路径推导歌词文件名，保证歌词与音频始终同名（含自动重命名后的 " (2)" 后缀）
+     */
+    private String toLyricName(Path audioPath, String audioExt, String fallbackBaseName) {
+        String audioName = audioPath.getFileName() == null ? null : audioPath.getFileName().toString();
+        if (audioName == null) {
+            return fallbackBaseName + ".lrc";
+        }
+        if (audioExt != null && !audioExt.isEmpty() && audioName.endsWith(audioExt)) {
+            return audioName.substring(0, audioName.length() - audioExt.length()) + ".lrc";
+        }
+        int dot = audioName.lastIndexOf('.');
+        return (dot > 0 ? audioName.substring(0, dot) : audioName) + ".lrc";
     }
 
     public void downloadSingleSongV2(Long id) {
@@ -439,12 +517,23 @@ public class MusicDownloadService implements InitializingBean {
         taskRepository.save(task);
 
         CloseableHttpResponse response = null;
+        // 目标文件是否由本次下载新建，用于失败时清理残留的半截文件
+        boolean newFile = false;
+        Path targetPath = null;
         try {
-            String fileName = analysisSingleMusic.getName();
+            String fileName = FileNameFormatter.render(fileNamePattern, analysisSingleMusic);
             String fileExt = getType(analysisSingleMusic.getUrl());
-            Path targetPath = Paths.get(dirPath, fileName + fileExt);
+            Path dir = Paths.get(dirPath);
+            targetPath = FileUtils.resolveTargetPath(dir, fileName, fileExt, fileExistsStrategy);
+            if (targetPath == null) {
+                // 策略为跳过且文件已存在
+                log.info("歌曲id: {} 的目标文件已存在,按配置跳过: {}", id, dir.resolve(fileName + fileExt));
+                markSkipped(task, "文件已存在，已跳过: " + dir.resolve(fileName + fileExt).getFileName());
+                return;
+            }
+            newFile = !Files.exists(targetPath);
 
-            log.info("开始将歌曲: {} 写入目录: {}", fileName, dirPath);
+            log.info("开始将歌曲: {} 写入目录: {}", targetPath.getFileName(), dirPath);
 
             // 使用 HttpClient 直接下载，获取 Content-Length 用于进度追踪
             HttpGet httpGet = new HttpGet(analysisSingleMusic.getUrl());
@@ -467,8 +556,13 @@ public class MusicDownloadService implements InitializingBean {
 
             // 带进度追踪的文件写入
             Files.createDirectories(targetPath.getParent());
+            // 覆盖策略下允许写入已存在的文件，其余策略只允许新建
+            StandardOpenOption[] openOptions = fileExistsStrategy == FileExistsStrategy.OVERWRITE
+                    ? new StandardOpenOption[]{StandardOpenOption.CREATE, StandardOpenOption.WRITE,
+                        StandardOpenOption.TRUNCATE_EXISTING}
+                    : new StandardOpenOption[]{StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE};
             try (InputStream is = entity.getContent();
-                 OutputStream os = Files.newOutputStream(targetPath, StandardOpenOption.CREATE_NEW)) {
+                 OutputStream os = Files.newOutputStream(targetPath, openOptions)) {
                 byte[] buffer = new byte[8192];
                 long bytesDownloaded = 0;
                 int len;
@@ -523,16 +617,23 @@ public class MusicDownloadService implements InitializingBean {
                     discNumber, trackNumber,
                     analysisSingleMusic.getYear(), analysisSingleMusic.getPic());
 
-            log.info("将歌曲: {} 写入目录: {} 已完成!", fileName, dirPath);
+            log.info("将歌曲: {} 写入目录: {} 已完成!", targetPath.getFileName(), dirPath);
 
-            // 写入歌词
+            // 写入歌词（歌词与音频同名，写入失败不影响下载结果）
             try {
-                log.info("开始将歌词: {} 写入目录: {}", fileName, dirPath);
-                FileUtils.writeToFile(Paths.get(dirPath, fileName + ".lrc"),
-                        analysisSingleMusic.getLyric().getBytes("UTF-8"));
-                log.info("将歌词: {} 写入目录: {} 已完成!", fileName, dirPath);
-            } catch (UnsupportedEncodingException e) {
-                log.error("歌词写入失败", e);
+                if (StringUtils.isNotBlank(analysisSingleMusic.getLyric())) {
+                    // 用音频的最终文件名推导歌词名，自动重命名后两者仍保持一致
+                    Path lyricPath = dir.resolve(toLyricName(targetPath, fileExt, fileName));
+                    // 覆盖策略下歌词也一并覆盖
+                    if (fileExistsStrategy == FileExistsStrategy.OVERWRITE) {
+                        Files.deleteIfExists(lyricPath);
+                    }
+                    log.info("开始将歌词: {} 写入目录: {}", lyricPath.getFileName(), dirPath);
+                    FileUtils.writeToFile(lyricPath, analysisSingleMusic.getLyric().getBytes("UTF-8"));
+                    log.info("将歌词: {} 写入目录: {} 已完成!", lyricPath.getFileName(), dirPath);
+                }
+            } catch (Exception e) {
+                log.warn("歌词写入失败: {}", fileName, e);
             }
 
             task.setStatus(DownloadTask.Status.COMPLETED);
@@ -546,8 +647,16 @@ public class MusicDownloadService implements InitializingBean {
 
         } catch (Exception e) {
             log.error("下载歌曲id: {} 失败!", id, e);
+            // 清理下载中断残留的半截文件（仅清理本次新建的文件）
+            if (newFile && targetPath != null) {
+                try {
+                    Files.deleteIfExists(targetPath);
+                } catch (IOException ignore) {
+                    log.warn("清理不完整的文件失败: {}", targetPath);
+                }
+            }
             task.setStatus(DownloadTask.Status.FAILED);
-            task.setErrorMessage(e.getMessage());
+            task.setErrorMessage(buildErrorMessage(e, targetPath));
             task.setCompleteTime(System.currentTimeMillis());
             task.setSpeed(0);
             task.setEta(0);
@@ -561,5 +670,78 @@ public class MusicDownloadService implements InitializingBean {
                 }
             }
         }
+    }
+
+    /**
+     * 标记任务为「已跳过」（文件已存在且策略为跳过）
+     */
+    private void markSkipped(DownloadTask task, String message) {
+        task.setStatus(DownloadTask.Status.SKIPPED);
+        task.setErrorMessage(message);
+        task.setCompleteTime(System.currentTimeMillis());
+        task.setSpeed(0);
+        task.setEta(0);
+        taskRepository.save(task);
+        hs.add(task.getSongId());
+        queue.offer(task.getSongId());
+    }
+
+    /**
+     * 把异常转换成用户能看懂的失败原因
+     * <p>
+     * JDK 抛出的原始信息往往只有一个文件路径（如 FileAlreadyExistsException 的 message 就是路径本身），
+     * 直接展示会让人完全不知道失败原因，这里按异常类型翻译成明确的原因描述。
+     */
+    private String buildErrorMessage(Throwable e, Path targetPath) {
+        String target = targetPath == null ? null : targetPath.toString();
+        if (e instanceof FileAlreadyExistsException) {
+            return "目标文件已存在: " + target + "（可在下载配置中把「文件已存在时」改为自动重命名或覆盖）";
+        }
+        if (e instanceof AccessDeniedException) {
+            return "没有写入权限: " + target;
+        }
+        if (e instanceof NoSuchFileException) {
+            return "目录不存在或已被删除: " + target;
+        }
+        if (e instanceof FileSystemException) {
+            // 磁盘空间不足、设备错误等，JDK 的 message 常常为空
+            return "文件系统错误(" + e.getClass().getSimpleName() + "): " + describeCause(e, target);
+        }
+        if (e instanceof SocketTimeoutException) {
+            return "下载超时，网络连接不稳定";
+        }
+        if (e instanceof ConnectException) {
+            return "无法连接到下载服务器: " + describeCause(e, target);
+        }
+        if (e instanceof UnknownHostException) {
+            return "网络异常，域名解析失败: " + e.getMessage();
+        }
+        if (e instanceof IOException) {
+            return "下载失败: " + describeCause(e, target);
+        }
+        return "下载失败(" + e.getClass().getSimpleName() + "): " + describeCause(e, target);
+    }
+
+    /**
+     * 提取可读的错误原因：优先异常自身的 message，其次根因的 message，最后回退到目标路径/异常类型
+     */
+    private String describeCause(Throwable e, String target) {
+        if (e == null) {
+            return target == null ? "未知原因" : target;
+        }
+        if (StringUtils.isNotBlank(e.getMessage())) {
+            return e.getMessage();
+        }
+        Throwable cause = e.getCause();
+        while (cause != null) {
+            if (StringUtils.isNotBlank(cause.getMessage())) {
+                return cause.getMessage();
+            }
+            cause = cause.getCause();
+        }
+        if (target != null) {
+            return target;
+        }
+        return e.getClass().getSimpleName();
     }
 }
